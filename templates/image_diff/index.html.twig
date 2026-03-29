@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Diff — Pixel-Level Comparison</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface2: #242736;
+            --border: #2e3146;
+            --text: #e4e6f0;
+            --text-dim: #8b8fa3;
+            --accent: #6c72cb;
+            --accent-hover: #7f85d8;
+            --danger: #e55b5b;
+            --success: #5bc784;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        header {
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        header h1 {
+            font-size: 20px;
+            font-weight: 600;
+            letter-spacing: -0.3px;
+        }
+
+        header .stats {
+            margin-left: auto;
+            font-size: 13px;
+            color: var(--text-dim);
+            display: flex;
+            gap: 20px;
+        }
+
+        header .stats .diff-count { color: var(--danger); font-weight: 600; }
+        header .stats .match-pct { color: var(--success); font-weight: 600; }
+
+        /* Upload area */
+        .upload-section {
+            display: flex;
+            gap: 24px;
+            padding: 24px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .upload-box {
+            flex: 1;
+            max-width: 500px;
+            min-width: 280px;
+            background: var(--surface);
+            border: 2px dashed var(--border);
+            border-radius: 12px;
+            padding: 40px 24px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            position: relative;
+        }
+
+        .upload-box:hover, .upload-box.dragover {
+            border-color: var(--accent);
+            background: var(--surface2);
+        }
+
+        .upload-box.has-image {
+            padding: 12px;
+            border-style: solid;
+        }
+
+        .upload-box .label {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .upload-box .hint {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .upload-box img {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 8px;
+        }
+
+        .upload-box .filename {
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-top: 8px;
+            word-break: break-all;
+        }
+
+        .upload-box input[type="file"] {
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            cursor: pointer;
+        }
+
+        /* Toolbar */
+        .toolbar {
+            display: none;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            padding: 10px 24px;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .toolbar.visible { display: flex; }
+
+        .toolbar .mode-group {
+            display: flex;
+            gap: 2px;
+            background: var(--surface2);
+            border-radius: 8px;
+            padding: 3px;
+        }
+
+        .toolbar .mode-btn {
+            padding: 6px 14px;
+            font-size: 13px;
+            font-weight: 500;
+            border: none;
+            background: transparent;
+            color: var(--text-dim);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+
+        .toolbar .mode-btn:hover { color: var(--text); }
+        .toolbar .mode-btn.active { background: var(--accent); color: #fff; }
+
+        .toolbar .separator {
+            width: 1px;
+            height: 24px;
+            background: var(--border);
+        }
+
+        .toolbar label {
+            font-size: 12px;
+            color: var(--text-dim);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .toolbar input[type="range"] {
+            width: 100px;
+            accent-color: var(--accent);
+        }
+
+        .toolbar .zoom-info {
+            font-size: 12px;
+            color: var(--text-dim);
+            margin-left: auto;
+        }
+
+        .toolbar .btn-small {
+            padding: 5px 10px;
+            font-size: 12px;
+            border: 1px solid var(--border);
+            background: var(--surface2);
+            color: var(--text);
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .toolbar .btn-small:hover { border-color: var(--accent); }
+
+        /* Compare area */
+        .compare-section {
+            display: none;
+            position: relative;
+            width: 100%;
+            flex: 1;
+        }
+
+        .compare-section.visible { display: block; }
+
+        .compare-container {
+            position: relative;
+            width: 100%;
+            height: calc(100vh - 200px);
+            overflow: hidden;
+            background: var(--surface);
+            cursor: grab;
+        }
+
+        .compare-container:active { cursor: grabbing; }
+
+        /* Checkerboard for transparency */
+        .compare-container::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image:
+                linear-gradient(45deg, #1e2030 25%, transparent 25%),
+                linear-gradient(-45deg, #1e2030 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #1e2030 75%),
+                linear-gradient(-45deg, transparent 75%, #1e2030 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+            z-index: 0;
+        }
+
+        .canvas-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            image-rendering: pixelated;
+            z-index: 1;
+        }
+
+        /* Side by side */
+        .side-by-side-container {
+            display: none;
+            width: 100%;
+            height: calc(100vh - 200px);
+            overflow: hidden;
+        }
+
+        .side-by-side-container.visible { display: flex; }
+
+        .sbs-panel {
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+            background: var(--surface);
+            cursor: grab;
+        }
+
+        .sbs-panel:active { cursor: grabbing; }
+
+        .sbs-panel::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image:
+                linear-gradient(45deg, #1e2030 25%, transparent 25%),
+                linear-gradient(-45deg, #1e2030 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #1e2030 75%),
+                linear-gradient(-45deg, transparent 75%, #1e2030 75%);
+            background-size: 20px 20px;
+            background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+            z-index: 0;
+        }
+
+        .sbs-panel canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            image-rendering: pixelated;
+            z-index: 1;
+        }
+
+        .sbs-panel .panel-label {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            z-index: 5;
+            background: rgba(0,0,0,0.6);
+            color: #fff;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            pointer-events: none;
+        }
+
+        .sbs-divider {
+            width: 5px;
+            background: var(--accent);
+            flex-shrink: 0;
+            box-shadow: 0 0 8px rgba(108, 114, 203, 0.5);
+        }
+
+        /* Split slider */
+        .split-handle {
+            display: none;
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: var(--accent);
+            z-index: 10;
+            cursor: col-resize;
+        }
+
+        .split-handle::before {
+            content: '⬤';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 28px;
+            height: 28px;
+            background: var(--accent);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+            color: white;
+        }
+
+        /* Color picker in toolbar */
+        .toolbar input[type="color"] {
+            width: 28px;
+            height: 28px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            cursor: pointer;
+            background: transparent;
+            padding: 1px;
+        }
+
+        .toolbar select {
+            padding: 5px 8px;
+            font-size: 12px;
+            background: var(--surface2);
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .upload-section { padding: 12px; gap: 12px; }
+            .toolbar { padding: 8px 12px; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>🔍 ImageDiff</h1>
+    <div class="stats" id="stats" style="display:none">
+        <span>Diff pixels: <span class="diff-count" id="diffCount">0</span></span>
+        <span>Match: <span class="match-pct" id="matchPct">100%</span></span>
+        <span>Dimensions: <span id="dimInfo">-</span></span>
+    </div>
+</header>
+
+<div class="upload-section" id="uploadSection">
+    <div class="upload-box" id="box1">
+        <input type="file" accept="image/*" id="file1">
+        <div class="label">Original Image</div>
+        <div class="hint">Click or drag & drop — PNG, JPG, WebP, BMP</div>
+    </div>
+    <div class="upload-box" id="box2">
+        <input type="file" accept="image/*" id="file2">
+        <div class="label">Changed Image</div>
+        <div class="hint">Click or drag & drop — PNG, JPG, WebP, BMP</div>
+    </div>
+</div>
+
+<div class="toolbar" id="toolbar">
+    <div class="mode-group">
+        <button class="mode-btn active" data-mode="difference">Difference</button>
+        <button class="mode-btn" data-mode="highlight">Highlight</button>
+        <button class="mode-btn" data-mode="sidebyside">Side by Side</button>
+        <button class="mode-btn" data-mode="split">Split</button>
+        <button class="mode-btn" data-mode="fade">Fade</button>
+        <button class="mode-btn" data-mode="onionskin">Onion Skin</button>
+    </div>
+
+    <div class="separator"></div>
+
+    <label id="thresholdControl">
+        Threshold:
+        <input type="range" id="threshold" min="0" max="100" value="10">
+        <span id="thresholdVal">0.10</span>
+    </label>
+
+    <label id="fadeControl" style="display:none">
+        Opacity:
+        <input type="range" id="fadeSlider" min="0" max="100" value="50">
+        <span id="fadeVal">50%</span>
+    </label>
+
+    <label id="diffColorControl">
+        Diff color:
+        <input type="color" id="diffColor" value="#ff0000">
+    </label>
+
+    <label>
+        <input type="checkbox" id="antiAlias" checked> Detect AA
+    </label>
+
+    <div class="separator"></div>
+
+    <button class="btn-small" id="btnFitView">Fit</button>
+    <button class="btn-small" id="btn1to1">1:1</button>
+    <button class="btn-small" id="btnZoomIn">+</button>
+    <button class="btn-small" id="btnZoomOut">−</button>
+    <span class="zoom-info" id="zoomInfo">100%</span>
+
+    <div class="separator"></div>
+    <button class="btn-small" id="btnExport">Export Diff PNG</button>
+    <button class="btn-small" id="btnReset" style="color:var(--danger)">Reset</button>
+</div>
+
+<!-- Single canvas view (Difference, Highlight, Fade, Onion Skin) -->
+<div class="compare-section" id="singleView">
+    <div class="compare-container" id="compareContainer">
+        <canvas class="canvas-layer" id="mainCanvas"></canvas>
+    </div>
+    <div class="split-handle" id="splitHandle"></div>
+</div>
+
+<!-- Side by side view -->
+<div class="side-by-side-container" id="sbsView">
+    <div class="sbs-panel" id="sbsLeft">
+        <div class="panel-label">Original</div>
+        <canvas></canvas>
+    </div>
+    <div class="sbs-divider"></div>
+    <div class="sbs-panel" id="sbsRight">
+        <div class="panel-label">Changed</div>
+        <canvas></canvas>
+    </div>
+</div>
+
+<script type="module">
+import pixelmatch from 'https://esm.run/pixelmatch';
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
+
+// State
+const state = {
+    img1: null,        // HTMLImageElement
+    img2: null,
+    img1Data: null,    // ImageData
+    img2Data: null,
+    diffData: null,    // ImageData (pixelmatch output)
+    width: 0,
+    height: 0,
+    mode: 'difference',
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    fadeOpacity: 0.5,
+    threshold: 0.1,
+    diffColor: [255, 0, 0],
+    includeAA: false,
+    splitPos: 0.5,
+    numDiffPixels: 0,
+};
+
+// ---- File loading ----
+
+function setupUpload(boxId, fileId, which) {
+    const box = $(boxId);
+    const input = $(fileId);
+
+    ['dragover', 'dragenter'].forEach(e => box.addEventListener(e, ev => {
+        ev.preventDefault();
+        box.classList.add('dragover');
+    }));
+    ['dragleave', 'drop'].forEach(e => box.addEventListener(e, () => {
+        box.classList.remove('dragover');
+    }));
+    box.addEventListener('drop', ev => {
+        ev.preventDefault();
+        const file = ev.dataTransfer.files[0];
+        if (file) loadImage(file, which, box);
+    });
+    input.addEventListener('change', () => {
+        if (input.files[0]) loadImage(input.files[0], which, box);
+    });
+}
+
+function loadImage(file, which, box) {
+    // Validate file type
+    if (!file.type.startsWith('image/')) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+            state[which] = img;
+            box.innerHTML = `<input type="file" accept="image/*" id="${which === 'img1' ? 'file1' : 'file2'}">`;
+            const preview = document.createElement('img');
+            preview.src = e.target.result;
+            box.appendChild(preview);
+            const fn = document.createElement('div');
+            fn.className = 'filename';
+            fn.textContent = `${file.name} — ${img.width}×${img.height}`;
+            box.appendChild(fn);
+            box.classList.add('has-image');
+
+            // Re-bind event
+            setupUpload(
+                which === 'img1' ? '#box1' : '#box2',
+                which === 'img1' ? '#file1' : '#file2',
+                which
+            );
+
+            if (state.img1 && state.img2) runComparison();
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+setupUpload('#box1', '#file1', 'img1');
+setupUpload('#box2', '#file2', 'img2');
+
+// ---- Comparison ----
+
+function getImageData(img, w, h) {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h);
+    return ctx.getImageData(0, 0, w, h);
+}
+
+function runComparison() {
+    const w = Math.max(state.img1.width, state.img2.width);
+    const h = Math.max(state.img1.height, state.img2.height);
+    state.width = w;
+    state.height = h;
+
+    state.img1Data = getImageData(state.img1, w, h);
+    state.img2Data = getImageData(state.img2, w, h);
+
+    computeDiff();
+
+    // Show UI
+    $('#toolbar').classList.add('visible');
+    $('#stats').style.display = 'flex';
+    switchMode(state.mode);
+    requestAnimationFrame(() => fitView());
+}
+
+function computeDiff() {
+    const {width, height, img1Data, img2Data, threshold, diffColor, includeAA} = state;
+    const diff = new ImageData(width, height);
+
+    state.numDiffPixels = pixelmatch(
+        img1Data.data, img2Data.data, diff.data,
+        width, height,
+        {
+            threshold,
+            includeAA,
+            alpha: 0.1,
+            diffColor,
+            diffColorAlt: null,
+            diffMask: false,
+        }
+    );
+
+    state.diffData = diff;
+
+    const total = width * height;
+    const matchPct = ((1 - state.numDiffPixels / total) * 100).toFixed(2);
+    $('#diffCount').textContent = state.numDiffPixels.toLocaleString();
+    $('#matchPct').textContent = matchPct + '%';
+    $('#dimInfo').textContent = `${width}×${height}`;
+
+    render();
+}
+
+// ---- Rendering ----
+
+function render() {
+    switch (state.mode) {
+        case 'difference': renderDifference(); break;
+        case 'highlight': renderHighlight(); break;
+        case 'fade': renderFade(); break;
+        case 'onionskin': renderOnionSkin(); break;
+        case 'split': renderSplit(); break;
+        case 'sidebyside': renderSideBySide(); break;
+    }
+}
+
+function setupCanvas(canvas, w, h) {
+    canvas.width = w;
+    canvas.height = h;
+    return canvas.getContext('2d');
+}
+
+function applyTransform(canvas) {
+    const container = canvas.parentElement;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    canvas.style.transformOrigin = '0 0';
+    canvas.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+}
+
+function renderDifference() {
+    const canvas = $('#mainCanvas');
+    const ctx = setupCanvas(canvas, state.width, state.height);
+    ctx.putImageData(state.diffData, 0, 0);
+    applyTransform(canvas);
+}
+
+function renderHighlight() {
+    const canvas = $('#mainCanvas');
+    const ctx = setupCanvas(canvas, state.width, state.height);
+
+    // Draw original image dimmed
+    ctx.putImageData(state.img1Data, 0, 0);
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, state.width, state.height);
+    ctx.globalAlpha = 1.0;
+
+    // Overlay only the diff pixels
+    const overlay = ctx.createImageData(state.width, state.height);
+    const diff = state.diffData.data;
+    const orig = state.img1Data.data;
+    for (let i = 0; i < diff.length; i += 4) {
+        // If pixel is different (red channel of diff matches diffColor)
+        const isOrig = (
+            diff[i] === Math.round(orig[i] * 0.1 + 255 * 0.9) ||
+            (diff[i] === orig[i] && diff[i+1] === orig[i+1] && diff[i+2] === orig[i+2])
+        );
+        // Simpler approach: if the diff pixel is colored with diffColor
+        const r = state.diffColor[0], g = state.diffColor[1], b = state.diffColor[2];
+        if (diff[i] === r && diff[i+1] === g && diff[i+2] === b) {
+            overlay.data[i] = r;
+            overlay.data[i+1] = g;
+            overlay.data[i+2] = b;
+            overlay.data[i+3] = 200;
+        }
+    }
+    ctx.putImageData(overlay, 0, 0);
+
+    // Composite: draw original at low alpha, then changed pixels highlighted
+    ctx.clearRect(0, 0, state.width, state.height);
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = state.width;
+    tmpCanvas.height = state.height;
+    const tmpCtx = tmpCanvas.getContext('2d');
+
+    // Base: grayscale of original
+    tmpCtx.putImageData(state.img1Data, 0, 0);
+    ctx.filter = 'saturate(0.3) brightness(0.5)';
+    ctx.drawImage(tmpCanvas, 0, 0);
+    ctx.filter = 'none';
+
+    // Highlight diff pixels on top
+    const hlCanvas = document.createElement('canvas');
+    hlCanvas.width = state.width;
+    hlCanvas.height = state.height;
+    const hlCtx = hlCanvas.getContext('2d');
+    const hlData = hlCtx.createImageData(state.width, state.height);
+
+    for (let i = 0; i < diff.length; i += 4) {
+        const r = state.diffColor[0], g = state.diffColor[1], b = state.diffColor[2];
+        if (diff[i] === r && diff[i+1] === g && diff[i+2] === b) {
+            hlData.data[i] = r;
+            hlData.data[i+1] = g;
+            hlData.data[i+2] = b;
+            hlData.data[i+3] = 220;
+        } else if (diff[i] === 255 && diff[i+1] === 255 && diff[i+2] === 0) {
+            // Anti-alias pixel
+            hlData.data[i] = 255;
+            hlData.data[i+1] = 255;
+            hlData.data[i+2] = 0;
+            hlData.data[i+3] = 150;
+        }
+    }
+    hlCtx.putImageData(hlData, 0, 0);
+    ctx.drawImage(hlCanvas, 0, 0);
+
+    applyTransform(canvas);
+}
+
+function renderFade() {
+    const canvas = $('#mainCanvas');
+    const ctx = setupCanvas(canvas, state.width, state.height);
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = state.width;
+    tmpCanvas.height = state.height;
+    const tmpCtx = tmpCanvas.getContext('2d');
+
+    // Draw image 1
+    tmpCtx.putImageData(state.img1Data, 0, 0);
+    ctx.globalAlpha = 1 - state.fadeOpacity;
+    ctx.drawImage(tmpCanvas, 0, 0);
+
+    // Draw image 2
+    tmpCtx.putImageData(state.img2Data, 0, 0);
+    ctx.globalAlpha = state.fadeOpacity;
+    ctx.drawImage(tmpCanvas, 0, 0);
+
+    ctx.globalAlpha = 1;
+    applyTransform(canvas);
+}
+
+function renderOnionSkin() {
+    const canvas = $('#mainCanvas');
+    const ctx = setupCanvas(canvas, state.width, state.height);
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = state.width;
+    tmpCanvas.height = state.height;
+    const tmpCtx = tmpCanvas.getContext('2d');
+
+    // Draw image 1 fully
+    tmpCtx.putImageData(state.img1Data, 0, 0);
+    ctx.drawImage(tmpCanvas, 0, 0);
+
+    // Overlay image 2 with opacity
+    tmpCtx.putImageData(state.img2Data, 0, 0);
+    ctx.globalAlpha = state.fadeOpacity;
+    ctx.drawImage(tmpCanvas, 0, 0);
+
+    ctx.globalAlpha = 1;
+    applyTransform(canvas);
+}
+
+function renderSplit() {
+    const canvas = $('#mainCanvas');
+    const ctx = setupCanvas(canvas, state.width, state.height);
+
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = state.width;
+    tmpCanvas.height = state.height;
+    const tmpCtx = tmpCanvas.getContext('2d');
+
+    const splitX = Math.round(state.width * state.splitPos);
+
+    // Left side: image 1
+    tmpCtx.putImageData(state.img1Data, 0, 0);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, splitX, state.height);
+    ctx.clip();
+    ctx.drawImage(tmpCanvas, 0, 0);
+    ctx.restore();
+
+    // Right side: image 2
+    tmpCtx.putImageData(state.img2Data, 0, 0);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(splitX, 0, state.width - splitX, state.height);
+    ctx.clip();
+    ctx.drawImage(tmpCanvas, 0, 0);
+    ctx.restore();
+
+    // Split line
+    ctx.strokeStyle = '#6c72cb';
+    ctx.lineWidth = 2 / state.zoom;
+    ctx.beginPath();
+    ctx.moveTo(splitX, 0);
+    ctx.lineTo(splitX, state.height);
+    ctx.stroke();
+
+    applyTransform(canvas);
+
+    // Position split handle
+    const handle = $('#splitHandle');
+    const container = $('#compareContainer');
+    const screenX = state.panX + splitX * state.zoom;
+    handle.style.left = screenX + 'px';
+    handle.style.display = 'block';
+}
+
+function renderSideBySide() {
+    const leftCanvas = $('#sbsLeft canvas');
+    const rightCanvas = $('#sbsRight canvas');
+    const tmpCanvas = document.createElement('canvas');
+    tmpCanvas.width = state.width;
+    tmpCanvas.height = state.height;
+    const tmpCtx = tmpCanvas.getContext('2d');
+
+    leftCanvas.width = state.width;
+    leftCanvas.height = state.height;
+    const lCtx = leftCanvas.getContext('2d');
+    tmpCtx.putImageData(state.img1Data, 0, 0);
+    lCtx.drawImage(tmpCanvas, 0, 0);
+
+    rightCanvas.width = state.width;
+    rightCanvas.height = state.height;
+    const rCtx = rightCanvas.getContext('2d');
+    tmpCtx.putImageData(state.img2Data, 0, 0);
+    rCtx.drawImage(tmpCanvas, 0, 0);
+
+    [leftCanvas, rightCanvas].forEach(c => {
+        c.style.transformOrigin = '0 0';
+        c.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+        c.style.imageRendering = 'pixelated';
+    });
+}
+
+// ---- Mode switching ----
+
+function switchMode(mode) {
+    state.mode = mode;
+
+    $$('.mode-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+
+    const singleModes = ['difference', 'highlight', 'fade', 'onionskin', 'split'];
+    const isSingle = singleModes.includes(mode);
+
+    $('#singleView').classList.toggle('visible', isSingle);
+    $('#sbsView').classList.toggle('visible', mode === 'sidebyside');
+    $('#splitHandle').style.display = (mode === 'split') ? 'block' : 'none';
+
+    // Toggle controls
+    $('#fadeControl').style.display = (mode === 'fade' || mode === 'onionskin') ? 'flex' : 'none';
+    $('#thresholdControl').style.display = (mode === 'difference' || mode === 'highlight') ? 'flex' : 'none';
+    $('#diffColorControl').style.display = (mode === 'difference' || mode === 'highlight') ? 'flex' : 'none';
+
+    render();
+}
+
+$$('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+});
+
+// ---- Zoom & Pan ----
+
+function fitView() {
+    const container = state.mode === 'sidebyside'
+        ? $('#sbsLeft')
+        : $('#compareContainer');
+    if (!container) return;
+
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    const scale = Math.min(cw / state.width, ch / state.height, 1);
+    state.zoom = scale;
+    state.panX = (cw - state.width * scale) / 2;
+    state.panY = (ch - state.height * scale) / 2;
+    updateZoomInfo();
+    render();
+}
+
+function updateZoomInfo() {
+    $('#zoomInfo').textContent = Math.round(state.zoom * 100) + '%';
+}
+
+function zoomAt(cx, cy, factor) {
+    const oldZoom = state.zoom;
+    state.zoom = Math.max(0.01, Math.min(200, state.zoom * factor));
+    const ratio = state.zoom / oldZoom;
+    state.panX = cx - (cx - state.panX) * ratio;
+    state.panY = cy - (cy - state.panY) * ratio;
+    updateZoomInfo();
+    render();
+}
+
+// Mouse wheel zoom
+function onWheel(e) {
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    zoomAt(cx, cy, factor);
+}
+
+// Pan
+let isPanning = false, panStartX, panStartY;
+
+function onPointerDown(e) {
+    if (e.button !== 0) return;
+    isPanning = true;
+    panStartX = e.clientX - state.panX;
+    panStartY = e.clientY - state.panY;
+    e.currentTarget.setPointerCapture(e.pointerId);
+}
+
+function onPointerMove(e) {
+    if (!isPanning) return;
+    state.panX = e.clientX - panStartX;
+    state.panY = e.clientY - panStartY;
+    render();
+}
+
+function onPointerUp() {
+    isPanning = false;
+}
+
+// Bind pan/zoom to containers
+function bindPanZoom(el) {
+    el.addEventListener('wheel', onWheel, {passive: false});
+    el.addEventListener('pointerdown', onPointerDown);
+    el.addEventListener('pointermove', onPointerMove);
+    el.addEventListener('pointerup', onPointerUp);
+}
+
+bindPanZoom($('#compareContainer'));
+bindPanZoom($('#sbsLeft'));
+bindPanZoom($('#sbsRight'));
+
+// Toolbar buttons
+$('#btnFitView').addEventListener('click', fitView);
+$('#btn1to1').addEventListener('click', () => {
+    const container = state.mode === 'sidebyside'
+        ? $('#sbsLeft')
+        : $('#compareContainer');
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    state.zoom = 1;
+    state.panX = (cw - state.width) / 2;
+    state.panY = (ch - state.height) / 2;
+    updateZoomInfo();
+    render();
+});
+$('#btnZoomIn').addEventListener('click', () => {
+    const container = state.mode === 'sidebyside'
+        ? $('#sbsLeft')
+        : $('#compareContainer');
+    const cw = container.clientWidth / 2;
+    const ch = container.clientHeight / 2;
+    zoomAt(cw, ch, 1.5);
+});
+$('#btnZoomOut').addEventListener('click', () => {
+    const container = state.mode === 'sidebyside'
+        ? $('#sbsLeft')
+        : $('#compareContainer');
+    const cw = container.clientWidth / 2;
+    const ch = container.clientHeight / 2;
+    zoomAt(cw, ch, 1 / 1.5);
+});
+
+// ---- Controls ----
+
+$('#threshold').addEventListener('input', (e) => {
+    state.threshold = e.target.value / 100;
+    $('#thresholdVal').textContent = state.threshold.toFixed(2);
+    if (state.img1Data) computeDiff();
+});
+
+$('#fadeSlider').addEventListener('input', (e) => {
+    state.fadeOpacity = e.target.value / 100;
+    $('#fadeVal').textContent = e.target.value + '%';
+    render();
+});
+
+$('#diffColor').addEventListener('input', (e) => {
+    const hex = e.target.value;
+    state.diffColor = [
+        parseInt(hex.slice(1, 3), 16),
+        parseInt(hex.slice(3, 5), 16),
+        parseInt(hex.slice(5, 7), 16),
+    ];
+    if (state.img1Data) computeDiff();
+});
+
+$('#antiAlias').addEventListener('change', (e) => {
+    state.includeAA = !e.target.checked;
+    if (state.img1Data) computeDiff();
+});
+
+// Split handle drag
+let isSplitDragging = false;
+$('#splitHandle').addEventListener('pointerdown', (e) => {
+    isSplitDragging = true;
+    e.target.setPointerCapture(e.pointerId);
+    e.stopPropagation();
+});
+document.addEventListener('pointermove', (e) => {
+    if (!isSplitDragging) return;
+    const container = $('#compareContainer');
+    const rect = container.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    // Convert screen position to image position
+    const imgX = (x - state.panX) / state.zoom;
+    state.splitPos = Math.max(0, Math.min(1, imgX / state.width));
+    render();
+});
+document.addEventListener('pointerup', () => { isSplitDragging = false; });
+
+// Export
+$('#btnExport').addEventListener('click', () => {
+    if (!state.diffData) return;
+    const c = document.createElement('canvas');
+    c.width = state.width;
+    c.height = state.height;
+    c.getContext('2d').putImageData(state.diffData, 0, 0);
+    const a = document.createElement('a');
+    a.download = 'diff.png';
+    a.href = c.toDataURL('image/png');
+    a.click();
+});
+
+// Reset
+$('#btnReset').addEventListener('click', () => {
+    state.img1 = null;
+    state.img2 = null;
+    state.img1Data = null;
+    state.img2Data = null;
+    state.diffData = null;
+    state.numDiffPixels = 0;
+
+    $('#toolbar').classList.remove('visible');
+    $('#singleView').classList.remove('visible');
+    $('#sbsView').classList.remove('visible');
+    $('#stats').style.display = 'none';
+    $('#splitHandle').style.display = 'none';
+
+    ['#box1', '#box2'].forEach((sel, i) => {
+        const box = $(sel);
+        const fid = i === 0 ? 'file1' : 'file2';
+        const which = i === 0 ? 'img1' : 'img2';
+        const label = i === 0 ? 'Original Image' : 'Changed Image';
+        box.classList.remove('has-image');
+        box.innerHTML = `
+            <input type="file" accept="image/*" id="${fid}">
+            <div class="label">${label}</div>
+            <div class="hint">Click or drag &amp; drop — PNG, JPG, WebP, BMP</div>
+        `;
+        setupUpload(sel, '#' + fid, which);
+    });
+});
+
+// Keyboard shortcuts
+document.addEventListener('keydown', (e) => {
+    if (e.key === '1') switchMode('difference');
+    if (e.key === '2') switchMode('highlight');
+    if (e.key === '3') switchMode('sidebyside');
+    if (e.key === '4') switchMode('split');
+    if (e.key === '5') switchMode('fade');
+    if (e.key === '6') switchMode('onionskin');
+    if (e.key === '0') fitView();
+    if (e.key === '+' || e.key === '=') {
+        const container = $('#compareContainer');
+        zoomAt(container.clientWidth / 2, container.clientHeight / 2, 1.3);
+    }
+    if (e.key === '-') {
+        const container = $('#compareContainer');
+        zoomAt(container.clientWidth / 2, container.clientHeight / 2, 1 / 1.3);
+    }
+});
+
+</script>
+</body>
+</html>

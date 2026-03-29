@@ -1,0 +1,7 @@
+/vendor/
+/var/
+/.env.local
+/docker-compose.override.yml
+/.idea/
+/.vscode/
+*.cache
