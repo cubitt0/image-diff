@@ -2,6 +2,8 @@
 
 Pixel-level image comparison tool built with Symfony and [pixelmatch](https://github.com/mapbox/pixelmatch). All processing runs client-side in the browser — no images are uploaded to a server.
 
+![Dashboard](docs/images/screenshot.png)
+
 ## Comparison Modes
 
 | Mode | Description |
